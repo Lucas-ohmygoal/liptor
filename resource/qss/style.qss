@@ -368,6 +368,14 @@ QLabel
     text-align: center;
 }
 
+QLabel#joint_number
+{
+    background: transparent;
+    color: white;
+    font-size: 55px;
+    text-align: center;
+}
+
 QLabel#error_label
 {
     background: transparent;

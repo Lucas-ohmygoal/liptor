@@ -44,7 +44,7 @@ class Connector(QWidget):
         self.origin_y = 0
         self.setMouseTracking(True)
         self.drag_flag = False
-        self.err = Error(self.top_box)
+        self.err = Error(self.top_box, "Welcome to use Liptor :)")
         self.setup_ui()
 
     def mousePressEvent(self, evt):

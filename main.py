@@ -41,7 +41,10 @@ class ViewController:
         self.viewConnector.setting_signal.connect(self.show_setting_window)
         self.viewMainWindow.setting_but_signal.connect(self.show_setting_window)
         self.viewMainWindow.arm_control_signal.connect(self.manipulate_arm)
-        self.viewMainWindow.pepper_arm_control_signal.connect(self.control_car)
+        self.viewMainWindow.joint_control_signal.connect(self.control_joints)
+        self.viewMainWindow.gripper_control_signal.connect(self.control_gripper)
+        self.viewMainWindow.vehicle_control_signal.connect(self.control_vehicle)
+        self.viewMainWindow.mode_switched_signal.connect(self.switch_mode)
         self.viewSettingWindow.save_signal.connect(self.show_connection_window)
         self.viewSettingWindow.return_signal.connect(self.show_previous_window)
 
@@ -79,22 +82,79 @@ class ViewController:
         service = roslibpy.Service(self.client, '/arm_manipulate', 'pepper_control/ArmControl')
         request = roslibpy.ServiceRequest(dict(ori=ori, which_arm='L'))
         print('Calling service...')
-        service.call(request, self.success_callback, lambda result: print("Response: {0}".format(result)),
-                     self.viewMainWindow.show_error(1, "E0004", "Service does not exist"))
+        service.call(request, self.success_callback, lambda result: (print("Response: {0}".format(result)),
+                                                                     self.viewMainWindow.show_error(1, "E0004", "Arm service does not exist")))
 
-    def control_car(self, dir):
-        service = roslibpy.Service(self.client, '/mrobot_drive', 'mrobot_teleop/Drive')
-        request = roslibpy.ServiceRequest(dict(dir=dir))
+    def control_joints(self, ori, vel, dst, joint):
+        service = roslibpy.Service(self.client, '/niryo_joint_control_gui', 'niryo_robot/JointControl')
+        request = roslibpy.ServiceRequest(dict(ord=ori, vel=vel, dst=dst, jnt=joint))
         print('Calling service...')
-        service.call(request, self.success_callback, lambda result: print("Response: {0}".format(result)),
-                     self.viewMainWindow.show_error(1, "E0003", "Service does not exist"))
+        service.call(request, self.success_callback, lambda result: (print("Response: {0}".format(result)),
+                                                                    self.viewMainWindow.show_error(2, "E0002", "Joint service does not exist")))
 
-    def manipulate_arm(self, ori):
-        service = roslibpy.Service(self.client, '/niryo_control', 'niryo_robot_control/ArmControl')
-        request = roslibpy.ServiceRequest({'ori': ori})
+    def control_gripper(self, status):
+        service = roslibpy.Service(self.client, '/niryo_gripper_control_gui', 'niryo_robot/GripperControl')
+        request = roslibpy.ServiceRequest({"status": status})
         print('Calling service...')
-        service.call(request, self.success_callback, lambda result: print("Response: {0}".format(result)),
-                     self.viewMainWindow.show_error(2, "E0002", "Service does not exist"))
+        service.call(request, self.success_callback, lambda result: (print("Response: {0}".format(result)),
+                                                                     self.viewMainWindow.show_error(2, "E0003", "Gripper service does not exist")))
+
+    def manipulate_arm(self, ori, vel, dst):
+        service = roslibpy.Service(self.client, '/niryo_arm_control_gui', 'niryo_robot/ArmControl')
+        request = roslibpy.ServiceRequest({'ord': ori, 'vel': vel, 'dst': dst})
+        print('Calling service...')
+        service.call(request, self.success_callback, lambda result: (print("Response: {0}".format(result)),
+                                                                     self.viewMainWindow.show_error(2, "E0004", "Arm service does not exist")))
+
+    def switch_mode(self, mode):
+        print(mode)
+        talker = roslibpy.Topic(self.client, '/control', 'std_msgs/String')
+        talker.publish(roslibpy.Message({'data': mode}))
+        print('Sending message...')
+
+    def control_vehicle(self, ori, speed):
+        talker = roslibpy.Topic(self.client, '/cmd_vel_m', 'geometry_msgs/Twist')
+        val = 7 * speed/100
+        print(val)
+        msg = None
+        if ori == 'F':
+            msg = roslibpy.Message({
+                'linear': {'x': 0.0, 'y': val, 'z': 0.0},
+                'angular': {'x': 0.0, 'y': 0.0, 'z': 0.0}
+            })
+        if ori == 'B':
+            msg = roslibpy.Message({
+                'linear': {'x': 0.0, 'y': -val, 'z': 0.0},
+                'angular': {'x': 0.0, 'y': 0.0, 'z': 0.0}
+            })
+        if ori == 'L':
+            msg = roslibpy.Message({
+                'linear': {'x': -val, 'y': 0.0, 'z': 0.0},
+                'angular': {'x': 0.0, 'y': 0.0, 'z': 0.0}
+            })
+        if ori == 'R':
+            msg = roslibpy.Message({
+                'linear': {'x': val, 'y': 0.0, 'z': 0.0},
+                'angular': {'x': 0.0, 'y': 0.0, 'z': 0.0}
+            })
+        if ori == 'J':
+            msg = roslibpy.Message({
+                'linear': {'x': 0.0, 'y': 0.0, 'z': 0.0},
+                'angular': {'x': 0.0, 'y': 0.0, 'z': 5.0}
+            })
+        if ori == 'K':
+            msg = roslibpy.Message({
+                'linear': {'x': 0.0, 'y': 0.0, 'z': 0.0},
+                'angular': {'x': 0.0, 'y': 0.0, 'z': -5.0}
+            })
+        if ori == 'X':
+            msg = roslibpy.Message({
+                'linear': {'x': 0.0, 'y': 0.0, 'z': 0.0},
+                'angular': {'x': 0.0, 'y': 0.0, 'z': 0.0}
+            })
+        print(msg)
+        talker.publish(roslibpy.Message(msg))
+        print('Sending message...')
 
     def success_callback(self, result):
         print("Service response: {0}".format(result))
@@ -104,7 +164,7 @@ class ViewController:
         try:
             self.client = roslibpy.Ros(host=self.arm_ip, port=int(self.arm_port))
             self.client.run()
-            self.viewMainWindow.connect_to_robot(self.arm_ip, int(self.arm_port))
+            self.viewMainWindow.connect_to_robot(self.arm_ip, int(self.arm_port), self.car_ip, int(self.car_port), self.cam_ip, int(self.cam_port))
         except Exception as e:
             print(e)
             self.viewConnector.show_error("E0001", "Failed to connect to ROS")
@@ -125,6 +185,7 @@ class ViewController:
             self.viewConnector.hide()
 
     def show_setting_window(self):
+        self.load_ip_port()
         self.load_ip_setting_view()
         if self.previousWindow.isFullScreen():
             self.viewSettingWindow.show_full_screen()

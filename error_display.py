@@ -1,8 +1,20 @@
 # Developer : Lucas Liu
 # Date: 7/14/2022 Time: 9:02 PM
+import time
 
 from PyQt5.Qt import *
 import sys
+
+
+class WorkThread(QThread):
+    trigger = pyqtSignal()
+
+    def __int__(self):
+        super(WorkThread, self).__init__()
+
+    def run(self):
+        time.sleep(3)
+        self.trigger.emit()
 
 
 class Error(QLabel):
@@ -12,17 +24,16 @@ class Error(QLabel):
         self.parent = parent
         self.error_code = error_code
         self.error_msg = error_msg
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(lambda: self.setVisible(False))
+        self.thread = WorkThread()
+        self.thread.trigger.connect(lambda: self.setVisible(False))
         self.setup_ui()
         self.setVisible(False)
 
     def showEvent(self, event):
         super().showEvent(event)
         self.setText("{0} - {1}".format(self.error_code, self.error_msg))
-        # self.adjustSize()
-        self.show_error_animation()
-        self.timer.start(3000)
+        # self.show_error_animation()
+        self.thread.start()
 
     def show_error_animation(self):
         animation = QPropertyAnimation(self)
@@ -39,7 +50,7 @@ class Error(QLabel):
         animation.start()
 
     def setup_ui(self):
-        self.resize(500, 80)
+        self.resize(550, 80)
         self.move(int(self.parent.width()), 80)
         self.setObjectName("error_board")
         self.setAlignment(Qt.AlignCenter)

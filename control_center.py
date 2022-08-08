@@ -1,6 +1,6 @@
 # Developer : Lucas Liu
 # Date: 6/7/2022 Time: 10:18 PM
-import string
+
 import sys
 from PyQt5.Qt import *
 from tool import QSSTool
@@ -13,8 +13,11 @@ from error_display import Error
 class ControlCenter(QWidget):
 
     setting_but_signal = pyqtSignal()
-    arm_control_signal = pyqtSignal(str)
-    pepper_arm_control_signal = pyqtSignal(str)
+    arm_control_signal = pyqtSignal(str, int, int)
+    joint_control_signal = pyqtSignal(str, int, int, int)
+    vehicle_control_signal = pyqtSignal(str, int)
+    gripper_control_signal = pyqtSignal(int)
+    mode_switched_signal = pyqtSignal(str)
 
     def __init__(self, parent=None, client=None, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
@@ -47,14 +50,17 @@ class ControlCenter(QWidget):
         self.setMouseTracking(True)
         self.drag_flag = False
         self.loading_gif = QMovie("resource/images/loading.gif")
+        self.gripper_status = True
 
         self.top_box_i = QWidget()
         self.bot_box_i = QWidget()
         self.cam_box_i = QLabel()
         self.map_box_i = QLabel()
         self.cam_img_i = CameraRosNode()
+        self.cam_dep_i = CameraRosNode()
         self.map_img_i = MapRosNode()
         self.cam_img_i.raw_image_signal.connect(self.set_image)
+        self.cam_dep_i.raw_image_signal.connect(self.set_depth)
         self.map_img_i.map_image_signal.connect(self.set_map)
         self.steer_box_i = QWidget()
         self.up_key_i = QToolButton()
@@ -94,13 +100,16 @@ class ControlCenter(QWidget):
         self.cam_box_a = QLabel()
         self.map_box_a = QLabel()
         self.cam_img_a = CameraRosNode()
+        self.cam_dep_a = CameraRosNode()
         self.cam_img_a.raw_image_signal.connect(self.set_arm_image)
+        self.cam_dep_a.raw_image_signal.connect(self.set_arm_depth)
         self.steer_box_a = QWidget()
         self.up_key_a = QToolButton()
         self.down_key_a = QToolButton()
         self.left_key_a = QToolButton()
         self.right_key_a = QToolButton()
-        self.stop_key_a = QToolButton()
+        self.switch_key_a = QToolButton()
+        self.switch_status = False
         self.prop_box_a = QWidget()
         self.speed_slider_a = QSlider()
         self.speed_label_a = QLabel()
@@ -109,6 +118,8 @@ class ControlCenter(QWidget):
         self.acl_term_a = QLabel()
         self.auto_mode_a = QRadioButton()
         self.auto_term_a = QLabel()
+        self.joint_number_a = QLabel()
+        self.joint_label_a = QLabel()
         self.grip_box_a = QWidget()
         self.grip_button_a = QToolButton()
         self.grip_term_a = QLabel()
@@ -169,6 +180,10 @@ class ControlCenter(QWidget):
         self.bot_box_c = QWidget()
         self.cam_box_c = QLabel()
         self.prop_box_c = QWidget()
+        self.cam_img_c = CameraRosNode()
+        self.cam_dep_c = CameraRosNode()
+        self.cam_img_c.raw_image_signal.connect(self.set_cam_image)
+        # self.cam_dep_c.raw_image_signal.connect(self.set_cam_depth)
         self.view_slider_c = QSlider()
         self.view_label_c = QLabel()
         self.view_term_pc = QLabel()
@@ -222,9 +237,8 @@ class ControlCenter(QWidget):
             self.cam_control_box_i.move(self.steer_box_i.x() + int(self.width() / 2) + 700,
                                         self.steer_box_i.y() + int(self.height() / 2) - 670)
         else:
-            self.cam_control_box_i.move(self.steer_box_i.x() + int(self.width() / 2) + 380,
-                                    self.steer_box_i.y() + int(self.height() / 2) - 610)
-
+            self.cam_control_box_i.move(self.steer_box_i.x() + int(self.width() / 2) + 430,
+                                        self.steer_box_i.y() + int(self.height() / 2) - 630)
         self.return_but_i.move(int(self.width() / 2) - 80, 80)
 
         bitmap = QBitmap(self.size())
@@ -270,23 +284,34 @@ class ControlCenter(QWidget):
         if self.ing_box.isVisible():
             up_key_pic = QIcon("resource/images/up-arrow-pr.png")
             self.up_key_i.setIcon(up_key_pic)
+            self.vehicle_control_signal.emit("F", self.speed_slider_i.value())
         if self.arm_box.isVisible():
-            up_key_pic = QIcon("resource/images/up-arrow-pr.png")
-            self.up_key_a.setIcon(up_key_pic)
+            if not self.switch_status:
+                up_key_pic = QIcon("resource/images/up-arrow-pr.png")
+                self.up_key_a.setIcon(up_key_pic)
+            else:
+                up_key_pic = QIcon("resource/images/up-arrow-br.png")
+                self.up_key_a.setIcon(up_key_pic)
         if self.car_box.isVisible():
             up_key_pic = QIcon("resource/images/up-arrow-pr.png")
             self.up_key_r.setIcon(up_key_pic)
+            self.vehicle_control_signal.emit("F", self.speed_slider_r.value())
 
     def up_key_released(self):
         if self.ing_box.isVisible():
             up_key_pic = QIcon("resource/images/up-arrow-p.png")
             self.up_key_i.setIcon(up_key_pic)
-            # self.pepper_arm_control_signal.emit("W")
-            self.pepper_arm_control_signal.emit("i")
+
         if self.arm_box.isVisible():
-            up_key_pic = QIcon("resource/images/up-arrow-p.png")
-            self.up_key_a.setIcon(up_key_pic)
-            self.arm_control_signal.emit("F")
+            if not self.switch_status:
+                up_key_pic = QIcon("resource/images/up-arrow-p.png")
+                self.up_key_a.setIcon(up_key_pic)
+                self.arm_control_signal.emit("F", self.speed_slider_a.value(), self.acl_slider_a.value())
+            else:
+                up_key_pic = QIcon("resource/images/up-arrow-w.png")
+                self.up_key_a.setIcon(up_key_pic)
+                self.arm_control_signal.emit("U", self.speed_slider_a.value(), self.acl_slider_a.value())
+
         if self.car_box.isVisible():
             up_key_pic = QIcon("resource/images/up-arrow-p.png")
             self.up_key_r.setIcon(up_key_pic)
@@ -295,23 +320,34 @@ class ControlCenter(QWidget):
         if self.ing_box.isVisible():
             down_key_pic = QIcon("resource/images/down-arrow-pr.png")
             self.down_key_i.setIcon(down_key_pic)
+            self.vehicle_control_signal.emit("B", self.speed_slider_i.value())
         if self.arm_box.isVisible():
-            down_key_pic = QIcon("resource/images/down-arrow-pr.png")
-            self.down_key_a.setIcon(down_key_pic)
+            if not self.switch_status:
+                down_key_pic = QIcon("resource/images/down-arrow-pr.png")
+                self.down_key_a.setIcon(down_key_pic)
+            else:
+                down_key_pic = QIcon("resource/images/down-arrow-br.png")
+                self.down_key_a.setIcon(down_key_pic)
         if self.car_box.isVisible():
             down_key_pic = QIcon("resource/images/down-arrow-pr.png")
             self.down_key_r.setIcon(down_key_pic)
+            self.vehicle_control_signal.emit("B", self.speed_slider_r.value())
 
     def down_key_released(self):
         if self.ing_box.isVisible():
             down_key_pic = QIcon("resource/images/down-arrow-p.png")
             self.down_key_i.setIcon(down_key_pic)
-            # self.pepper_arm_control_signal.emit("S")
-            self.pepper_arm_control_signal.emit(",")
+
         if self.arm_box.isVisible():
-            down_key_pic = QIcon("resource/images/down-arrow-p.png")
-            self.down_key_a.setIcon(down_key_pic)
-            self.arm_control_signal.emit("B")
+            if not self.switch_status:
+                down_key_pic = QIcon("resource/images/down-arrow-p.png")
+                self.down_key_a.setIcon(down_key_pic)
+                self.arm_control_signal.emit("B", self.speed_slider_a.value(), self.acl_slider_a.value())
+            else:
+                down_key_pic = QIcon("resource/images/down-arrow-w.png")
+                self.down_key_a.setIcon(down_key_pic)
+                self.arm_control_signal.emit("D", self.speed_slider_a.value(), self.acl_slider_a.value())
+
         if self.car_box.isVisible():
             down_key_pic = QIcon("resource/images/down-arrow-p.png")
             self.down_key_r.setIcon(down_key_pic)
@@ -320,23 +356,33 @@ class ControlCenter(QWidget):
         if self.ing_box.isVisible():
             left_key_pic = QIcon("resource/images/left-arrow-pr.png")
             self.left_key_i.setIcon(left_key_pic)
+            self.vehicle_control_signal.emit("L", self.speed_slider_i.value())
         if self.arm_box.isVisible():
-            left_key_pic = QIcon("resource/images/left-arrow-pr.png")
-            self.left_key_a.setIcon(left_key_pic)
+            if not self.switch_status:
+                left_key_pic = QIcon("resource/images/left-arrow-pr.png")
+                self.left_key_a.setIcon(left_key_pic)
+            else:
+                left_key_pic = QIcon("resource/images/anticlockwise-arrow-r.png")
+                self.left_key_a.setIcon(left_key_pic)
         if self.car_box.isVisible():
             left_key_pic = QIcon("resource/images/left-arrow-pr.png")
             self.left_key_r.setIcon(left_key_pic)
+            self.vehicle_control_signal.emit("L", self.speed_slider_r.value())
 
     def left_key_released(self):
         if self.ing_box.isVisible():
             left_key_pic = QIcon("resource/images/left-arrow-p.png")
             self.left_key_i.setIcon(left_key_pic)
-            # self.pepper_arm_control_signal.emit("A")
-            self.pepper_arm_control_signal.emit("j")
+
         if self.arm_box.isVisible():
-            left_key_pic = QIcon("resource/images/left-arrow-p.png")
-            self.left_key_a.setIcon(left_key_pic)
-            self.arm_control_signal.emit("L")
+            if not self.switch_status:
+                left_key_pic = QIcon("resource/images/left-arrow-p.png")
+                self.left_key_a.setIcon(left_key_pic)
+                self.arm_control_signal.emit("L", self.speed_slider_a.value(), self.acl_slider_a.value())
+            else:
+                left_key_pic = QIcon("resource/images/anticlockwise-arrow-w.png")
+                self.left_key_a.setIcon(left_key_pic)
+                self.arm_control_signal.emit("A", self.speed_slider_a.value(), self.acl_slider_a.value())
         if self.car_box.isVisible():
             left_key_pic = QIcon("resource/images/left-arrow-p.png")
             self.left_key_r.setIcon(left_key_pic)
@@ -345,23 +391,33 @@ class ControlCenter(QWidget):
         if self.ing_box.isVisible():
             right_key_pic = QIcon("resource/images/right-arrow-pr.png")
             self.right_key_i.setIcon(right_key_pic)
+            self.vehicle_control_signal.emit("R", self.speed_slider_i.value())
         if self.arm_box.isVisible():
-            right_key_pic = QIcon("resource/images/right-arrow-pr.png")
-            self.right_key_a.setIcon(right_key_pic)
+            if not self.switch_status:
+                right_key_pic = QIcon("resource/images/right-arrow-pr.png")
+                self.right_key_a.setIcon(right_key_pic)
+            else:
+                right_key_pic = QIcon("resource/images/clockwise-arrow-r.png")
+                self.right_key_a.setIcon(right_key_pic)
         if self.car_box.isVisible():
             right_key_pic = QIcon("resource/images/right-arrow-pr.png")
             self.right_key_r.setIcon(right_key_pic)
+            self.vehicle_control_signal.emit("R", self.speed_slider_r.value())
 
     def right_key_released(self):
         if self.ing_box.isVisible():
             right_key_pic = QIcon("resource/images/right-arrow-p.png")
             self.right_key_i.setIcon(right_key_pic)
-            # self.pepper_arm_control_signal.emit("D")
-            self.pepper_arm_control_signal.emit("l")
+
         if self.arm_box.isVisible():
-            right_key_pic = QIcon("resource/images/right-arrow-p.png")
-            self.right_key_a.setIcon(right_key_pic)
-            self.arm_control_signal.emit("R")
+            if not self.switch_status:
+                right_key_pic = QIcon("resource/images/right-arrow-p.png")
+                self.right_key_a.setIcon(right_key_pic)
+                self.arm_control_signal.emit("R", self.speed_slider_a.value(), self.acl_slider_a.value())
+            else:
+                right_key_pic = QIcon("resource/images/clockwise-arrow-w.png")
+                self.right_key_a.setIcon(right_key_pic)
+                self.arm_control_signal.emit("C", self.speed_slider_a.value(), self.acl_slider_a.value())
         if self.car_box.isVisible():
             right_key_pic = QIcon("resource/images/right-arrow-p.png")
             self.right_key_r.setIcon(right_key_pic)
@@ -377,9 +433,10 @@ class ControlCenter(QWidget):
     def grip_up_released(self):
         if self.ing_box.isVisible():
             self.grip_up_key_i.setIconSize(QSize(90, 90))
-            self.pepper_arm_control_signal.emit("I")
+            self.arm_control_signal.emit("U", self.speed_slider_i.value(), self.acl_slider_i.value())
         if self.arm_box.isVisible():
             self.grip_up_key_a.setIconSize(QSize(90, 90))
+            self.joint_control_signal.emit("I", self.speed_slider_a.value(), self.acl_slider_a.value(), int(self.joint_number_a.text()))
         if self.car_box.isVisible():
             self.grip_up_key_r.setIconSize(QSize(90, 90))
 
@@ -394,58 +451,110 @@ class ControlCenter(QWidget):
     def grip_down_released(self):
         if self.ing_box.isVisible():
             self.grip_down_key_i.setIconSize(QSize(90, 90))
-            self.pepper_arm_control_signal.emit("K")
+            self.arm_control_signal.emit("D", self.speed_slider_i.value(), self.acl_slider_i.value())
         if self.arm_box.isVisible():
             self.grip_down_key_a.setIconSize(QSize(90, 90))
+            self.joint_control_signal.emit("K", self.speed_slider_a.value(), self.acl_slider_a.value(), int(self.joint_number_a.text()))
         if self.car_box.isVisible():
             self.grip_down_key_r.setIconSize(QSize(90, 90))
 
     def grip_left_pressed(self):
         if self.ing_box.isVisible():
             self.grip_left_key_i.setIconSize(QSize(80, 80))
+            self.vehicle_control_signal.emit("J", self.speed_slider_i.value())
         if self.arm_box.isVisible():
             self.grip_left_key_a.setIconSize(QSize(80, 80))
         if self.car_box.isVisible():
             self.grip_left_key_r.setIconSize(QSize(80, 80))
+            self.vehicle_control_signal.emit("J", self.speed_slider_r.value())
 
     def grip_left_released(self):
         if self.ing_box.isVisible():
             self.grip_left_key_i.setIconSize(QSize(90, 90))
-            self.pepper_arm_control_signal.emit("J")
+
         if self.arm_box.isVisible():
             self.grip_left_key_a.setIconSize(QSize(90, 90))
+            num = int(self.joint_number_a.text())
+            if num > 0:
+                num -= 1
+                self.joint_number_a.setText("{0}".format(num))
+            else:
+                self.joint_number_a.setText("5")
+            # self.joint_control_signal.emit("J", self.speed_slider_a.value(), self.acl_slider_a.value())
         if self.car_box.isVisible():
             self.grip_left_key_r.setIconSize(QSize(90, 90))
 
     def grip_right_pressed(self):
         if self.ing_box.isVisible():
             self.grip_right_key_i.setIconSize(QSize(80, 80))
+            self.vehicle_control_signal.emit("K", self.speed_slider_i.value())
         if self.arm_box.isVisible():
             self.grip_right_key_a.setIconSize(QSize(80, 80))
         if self.car_box.isVisible():
             self.grip_right_key_r.setIconSize(QSize(80, 80))
+            self.vehicle_control_signal.emit("K", self.speed_slider_r.value())
 
     def grip_right_released(self):
         if self.ing_box.isVisible():
             self.grip_right_key_i.setIconSize(QSize(90, 90))
-            self.pepper_arm_control_signal.emit("L")
         if self.arm_box.isVisible():
             self.grip_right_key_a.setIconSize(QSize(90, 90))
+            num = int(self.joint_number_a.text())
+            if num < 5:
+                num += 1
+                self.joint_number_a.setText("{0}".format(num))
+            else:
+                self.joint_number_a.setText("0")
+            # self.joint_control_signal.emit("L", self.speed_slider_a.value(), self.acl_slider_a.value())
         if self.car_box.isVisible():
             self.grip_right_key_r.setIconSize(QSize(90, 90))
+
+    def switch_key_pressed(self):
+        pass
+
+    def switch_key_released(self):
+        if self.arm_box.isVisible():
+            if not self.switch_status:
+                self.switch_status = True
+                up_key_pic = QIcon("resource/images/up-arrow-w.png")
+                self.up_key_a.setIcon(up_key_pic)
+                down_key_pic = QIcon("resource/images/down-arrow-w.png")
+                self.down_key_a.setIcon(down_key_pic)
+                left_key_pic = QIcon("resource/images/anticlockwise-arrow-w.png")
+                self.left_key_a.setIcon(left_key_pic)
+                right_key_pic = QIcon("resource/images/clockwise-arrow-w.png")
+                self.right_key_a.setIcon(right_key_pic)
+                switch_key_pic = QIcon("resource/images/robotic-arm-lb.png")
+                self.switch_key_a.setIcon(switch_key_pic)
+            else:
+                self.switch_status = False
+                up_key_pic = QIcon("resource/images/up-arrow-p.png")
+                self.up_key_a.setIcon(up_key_pic)
+                down_key_pic = QIcon("resource/images/down-arrow-p.png")
+                self.down_key_a.setIcon(down_key_pic)
+                left_key_pic = QIcon("resource/images/left-arrow-p.png")
+                self.left_key_a.setIcon(left_key_pic)
+                right_key_pic = QIcon("resource/images/right-arrow-p.png")
+                self.right_key_a.setIcon(right_key_pic)
+                switch_key_pic = QIcon("resource/images/robotic-arm-pi.png")
+                self.switch_key_a.setIcon(switch_key_pic)
 
     def stop_key_click(self):
         if self.ing_box.isVisible():
             self.stop_key_i.animateClick()
 
         if self.arm_box.isVisible():
-            self.stop_key_a.animateClick()
+            self.switch_key_a.animateClick()
 
         if self.car_box.isVisible():
             self.stop_key_r.animateClick()
 
     def stop_key_released(self):
         # self.stop_key_i.setStyleSheet("padding: 0px 0px 0px 0px;")
+        if self.ing_box.isVisible():
+            self.vehicle_control_signal.emit("X", self.speed_slider_r.value())
+
+    def stop_key_pressed(self):
         pass
 
     def cam_up_pressed(self):
@@ -497,6 +606,7 @@ class ControlCenter(QWidget):
             cam_up = QIcon("resource/images/arrow_up.png")
             self.cam_up_i.setIcon(cam_up)
             self.cam_up_i.setIconSize(QSize(60, 60))
+            self.arm_control_signal.emit("F", self.speed_slider_i.value(), self.acl_slider_i.value())
 
         if self.cam_box.isVisible():
             cam_up = QIcon("resource/images/arrow_up.png")
@@ -508,6 +618,7 @@ class ControlCenter(QWidget):
             cam_down = QIcon("resource/images/arrow_down.png")
             self.cam_down_i.setIcon(cam_down)
             self.cam_down_i.setIconSize(QSize(60, 60))
+            self.arm_control_signal.emit("B", self.speed_slider_i.value(), self.acl_slider_i.value())
 
         if self.cam_box.isVisible():
             cam_down = QIcon("resource/images/arrow_down.png")
@@ -519,6 +630,7 @@ class ControlCenter(QWidget):
             cam_left = QIcon("resource/images/arrow_left.png")
             self.cam_left_i.setIcon(cam_left)
             self.cam_left_i.setIconSize(QSize(60, 60))
+            self.arm_control_signal.emit("L", self.speed_slider_i.value(), self.acl_slider_i.value())
 
         if self.cam_box.isVisible():
             cam_left = QIcon("resource/images/arrow_left.png")
@@ -530,6 +642,7 @@ class ControlCenter(QWidget):
             cam_right = QIcon("resource/images/arrow_right.png")
             self.cam_right_i.setIcon(cam_right)
             self.cam_right_i.setIconSize(QSize(60, 60))
+            self.arm_control_signal.emit("R", self.speed_slider_i.value(), self.acl_slider_i.value())
 
         if self.cam_box.isVisible():
             cam_right = QIcon("resource/images/arrow_right.png")
@@ -550,7 +663,7 @@ class ControlCenter(QWidget):
             self.right_key_pressed()
 
         if evt.key() == Qt.Key_F:
-            self.stop_key_click()
+            self.stop_key_pressed()
 
         if evt.key() == Qt.Key_G:
             self.grip_button_click()
@@ -591,6 +704,9 @@ class ControlCenter(QWidget):
 
         if evt.key() == Qt.Key_D:
             self.right_key_released()
+
+        if evt.key() == Qt.Key_F:
+            self.stop_key_released()
 
         if evt.key() == Qt.Key_I:
             self.grip_up_released()
@@ -745,12 +861,24 @@ class ControlCenter(QWidget):
     def grip_button_pressed(self):
         if self.ing_box.isVisible():
             self.grip_button_i.setEnabled(False)
+            if self.gripper_status == True:
+                self.gripper_control_signal.emit(0)
+                self.gripper_status = False
+            else:
+                self.gripper_control_signal.emit(1)
+                self.gripper_status = True
             timer = QTimer(self)
             timer.timeout.connect(lambda: self.grip_button_i.setEnabled(True))
             timer.start(3000)
 
         if self.arm_box.isVisible():
             self.grip_button_a.setEnabled(False)
+            if self.gripper_status == True:
+                self.gripper_control_signal.emit(0)
+                self.gripper_status = False
+            else:
+                self.gripper_control_signal.emit(1)
+                self.gripper_status = True
             timer = QTimer(self)
             timer.timeout.connect(lambda: self.grip_button_a.setEnabled(True))
             timer.start(3000)
@@ -778,6 +906,20 @@ class ControlCenter(QWidget):
         self.cam_box_i.setScaledContents(True)
         self.cam_box_i.setPixmap(img_pix)
 
+    def set_depth(self, cv_image):
+        image_height, image_width, image_depth = cv_image.shape
+        img_dis = QImage(cv_image, image_width, image_height, image_width * image_depth, QImage.Format_RGB888)
+        img_pix = QPixmap(img_dis)
+        self.map_box_i.setScaledContents(True)
+        self.map_box_i.setPixmap(img_pix)
+
+    def set_arm_depth(self, cv_image):
+        image_height, image_width, image_depth = cv_image.shape
+        img_dis = QImage(cv_image, image_width, image_height, image_width * image_depth, QImage.Format_RGB888)
+        img_pix = QPixmap(img_dis)
+        self.map_box_a.setScaledContents(True)
+        self.map_box_a.setPixmap(img_pix)
+
     def set_arm_image(self, cv_image):
         # cv2.imshow("Image window", self.cam_img_a.cv_image)
         # cv2.waitKey(3)
@@ -786,6 +928,30 @@ class ControlCenter(QWidget):
         img_pix = QPixmap(img_dis)
         self.cam_box_a.setScaledContents(True)
         self.cam_box_a.setPixmap(img_pix)
+
+    def set_cam_depth(self, cv_image):
+        image_height, image_width, image_depth = cv_image.shape
+        img_dis = QImage(cv_image, image_width, image_height, image_width * image_depth, QImage.Format_RGB888)
+        img_pix = QPixmap(img_dis)
+        self.cam_box_c.setScaledContents(True)
+        self.cam_box_c.setPixmap(img_pix)
+
+    def set_cam_image(self, cv_image):
+        # cv2.imshow("Image window", self.cam_img_a.cv_image)
+        # cv2.waitKey(3)
+        image_height, image_width, image_depth = cv_image.shape
+        img_dis = QImage(cv_image, image_width, image_height, image_width * image_depth, QImage.Format_RGB888)
+        img_pix = QPixmap(img_dis)
+        self.cam_box_c.setScaledContents(True)
+        self.cam_box_c.setPixmap(img_pix)
+
+    def image_type_changed(self):
+        if self.depth_combo_c.currentIndex() == 0:
+            self.cam_img_c.raw_image_signal.disconnect(self.set_cam_depth)
+            self.cam_dep_c.raw_image_signal.connect(self.set_cam_depth)
+        else:
+            self.cam_img_c.raw_image_signal.connect(self.set_cam_depth)
+            self.cam_dep_c.raw_image_signal.disconnect(self.set_cam_depth)
 
     def set_map(self, cv_map):
         # cv2.imshow("Map window", cv_map)
@@ -796,10 +962,14 @@ class ControlCenter(QWidget):
         self.map_box_i.setScaledContents(True)
         self.map_box_i.setPixmap(img_pix)
 
-    def connect_to_robot(self, ip, port):
-        self.cam_img_a.connect_master(ip, port, '/camera_image', 'niryo_control/CvImage')
-        self.cam_img_i.connect_master(ip, port, '/camera_image', 'pepper_control/CvImage')
-        self.map_img_i.connect_master(ip, port, "/map_image", "pepper_control/MapImage")
+    def connect_to_robot(self, arm_ip, arm_port, car_ip, car_port, cam_ip, cam_port):
+        # self.cam_img_a.connect_master(cam_ip, cam_port, '/camera_image_color', 'cvimage_msgs/CvImage')
+        # self.cam_dep_a.connect_master(cam_ip, cam_port, '/camera_image_depth', 'cvimage_msgs/CvImage')
+        # self.cam_img_i.connect_master(cam_ip, cam_port, '/camera_image_color', 'cvimage_msgs/CvImage')
+        # self.cam_dep_i.connect_master(cam_ip, cam_port, '/camera_image_depth', 'cvimage_msgs/CvImage')
+          self.map_img_i.connect_master(arm_ip, arm_port, "/map_image", "mrobot_control/MapImage")
+        # self.cam_img_c.connect_master(cam_ip, cam_port, '/camera_image_color', 'cvimage_msgs/CvImage')
+        # self.cam_dep_c.connect_master(cam_ip, cam_port, '/camera_image_depth', 'cvimage_msgs/CvImage')
 
     def show_error(self, index, error_code, error_msg):
         if index == 1:
@@ -819,16 +989,34 @@ class ControlCenter(QWidget):
             self.err_c.error_msg = error_msg
             self.err_c.setVisible(True)
 
+    def mode_switched(self):
+        if self.ing_box.isVisible():
+            if self.auto_mode_i.isChecked():
+                self.mode_switched_signal.emit('a')
+            else:
+                self.mode_switched_signal.emit('m')
+
+        if self.arm_box.isVisible():
+            pass
+
+        if self.car_box.isVisible():
+            if self.auto_mode_r.isChecked():
+                self.mode_switched_signal.emit('a')
+            else:
+                self.mode_switched_signal.emit('m')
+
     def setup_ui(self):
 
         def int_button_pressed():
             sl.setCurrentIndex(1)
-            self.cam_img_i.connect_ros()
-            self.map_img_i.connect_ros()
+            # self.cam_img_i.connect_ros()
+            # self.cam_dep_i.connect_ros()
 
         def arm_button_pressed():
             sl.setCurrentIndex(2)
-            self.cam_img_a.connect_ros()
+            # self.cam_img_a.connect_ros()
+            # self.cam_dep_a.connect_ros()
+            self.map_img_i.connect_ros()
 
         def car_button_pressed():
             sl.setCurrentIndex(3)
@@ -992,7 +1180,7 @@ class ControlCenter(QWidget):
         self.int_button.setIcon(int_icon)
         self.int_button.setIconSize(QSize(310, 350))
         self.int_button.setCursor(Qt.PointingHandCursor)
-        self.int_button.setText("Integrate Control")
+        self.int_button.setText("Global Control")
         self.int_button.adjustSize()
         self.int_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.int_button.setStyleSheet("border-image: url(resource/images/blue_brush.png);")
@@ -1011,7 +1199,7 @@ class ControlCenter(QWidget):
         self.car_button.setIcon(car_icon)
         self.car_button.setIconSize(QSize(315, 358))
         self.car_button.setCursor(Qt.PointingHandCursor)
-        self.car_button.setText("Rover Control")
+        self.car_button.setText("Vehicle Control")
         self.car_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.car_button.setStyleSheet("border-image: url(resource/images/blue_brush.png);")
         self.car_button.pressed.connect(car_button_pressed)
@@ -1020,7 +1208,7 @@ class ControlCenter(QWidget):
         self.cam_button.setIcon(cam_icon)
         self.cam_button.setIconSize(QSize(292, 353))
         self.cam_button.setCursor(Qt.PointingHandCursor)
-        self.cam_button.setText("Camera View")
+        self.cam_button.setText("Camera Control")
         self.cam_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.cam_button.setStyleSheet("border-image: url(resource/images/blue_brush.png);")
         self.cam_button.pressed.connect(cam_button_pressed)
@@ -1082,8 +1270,8 @@ class ControlCenter(QWidget):
         self.stop_key_i.setIconSize(QSize(80, 80))
         self.stop_key_i.setObjectName("stop_key")
         self.stop_key_i.setCursor(Qt.PointingHandCursor)
-        # self.stop_key_i.pressed.connect(self.stop_key_pressed)
-        # self.stop_key_i.released.connect(self.stop_key_released)
+        self.stop_key_i.pressed.connect(self.stop_key_pressed)
+        self.stop_key_i.released.connect(self.stop_key_released)
 
         self.prop_box_i.setParent(self.bot_box_i)
         self.prop_box_i.resize(400, 300)
@@ -1132,12 +1320,13 @@ class ControlCenter(QWidget):
         self.acl_slider_i.setCursor(Qt.PointingHandCursor)
         self.auto_mode_i.resize(100, 50)
         self.auto_mode_i.setCursor(Qt.PointingHandCursor)
+        self.auto_mode_i.clicked.connect(self.mode_switched)
         self.speed_term_i.resize(100, 40)
         self.speed_term_i.setText("(V)")
         self.speed_term_i.setObjectName("speed_label")
         self.speed_term_i.setAlignment(Qt.AlignCenter)
         self.acl_term_i.resize(100, 40)
-        self.acl_term_i.setText("(A)")
+        self.acl_term_i.setText("(D)")
         self.acl_term_i.setObjectName("accelerate_label")
         self.acl_term_i.setAlignment(Qt.AlignCenter)
         self.auto_term_i.resize(100, 40)
@@ -1287,7 +1476,7 @@ class ControlCenter(QWidget):
         self.steer_box_a.setLayout(gl_a)
         gl_a.addWidget(self.up_key_a, 0, 1)
         gl_a.addWidget(self.left_key_a, 1, 0)
-        gl_a.addWidget(self.stop_key_a, 1, 1)
+        gl_a.addWidget(self.switch_key_a, 1, 1)
         gl_a.addWidget(self.right_key_a, 1, 2)
         gl_a.addWidget(self.down_key_a, 2, 1)
         gl_a.setSpacing(0)
@@ -1320,13 +1509,13 @@ class ControlCenter(QWidget):
         self.right_key_a.setCursor(Qt.PointingHandCursor)
         self.right_key_a.pressed.connect(self.right_key_pressed)
         self.right_key_a.released.connect(self.right_key_released)
-        stop_key_icon = QIcon("resource/images/stop-button.png")
-        self.stop_key_a.setIcon(stop_key_icon)
-        self.stop_key_a.setIconSize(QSize(80, 80))
-        self.stop_key_a.setObjectName("stop_key")
-        self.stop_key_a.setCursor(Qt.PointingHandCursor)
-        # self.stop_key_a.pressed.connect(self.stop_key_pressed)
-        # self.stop_key_a.released.connect(self.stop_key_released)
+        switch_key_icon = QIcon("resource/images/robotic-arm-pi.png")
+        self.switch_key_a.setIcon(switch_key_icon)
+        self.switch_key_a.setIconSize(QSize(80, 80))
+        self.switch_key_a.setObjectName("stop_key")
+        self.switch_key_a.setCursor(Qt.PointingHandCursor)
+        self.switch_key_a.pressed.connect(self.switch_key_pressed)
+        self.switch_key_a.released.connect(self.switch_key_released)
 
         bot_vbl.addWidget(self.return_but_a)
         bot_vbl.addSpacing(150)
@@ -1375,6 +1564,8 @@ class ControlCenter(QWidget):
         prop_gl_a.addWidget(self.speed_term_a, 1, 0)
         prop_gl_a.addWidget(self.acl_slider_a, 0, 1)
         prop_gl_a.addWidget(self.acl_term_a, 1, 1)
+        prop_gl_a.addWidget(self.joint_number_a, 0, 2)
+        prop_gl_a.addWidget(self.joint_label_a, 1, 2)
         prop_gl_a.setSpacing(15)
         prop_gl_a.setContentsMargins(0, 0, 0, 0)
         prop_gl_a.setAlignment(self.speed_slider_a, Qt.AlignHCenter)
@@ -1383,6 +1574,10 @@ class ControlCenter(QWidget):
         prop_gl_a.setAlignment(self.auto_mode_a, Qt.AlignVCenter | Qt.AlignHCenter)
         prop_gl_a.setAlignment(self.auto_term_a, Qt.AlignHCenter)
         prop_gl_a.setAlignment(self.auto_term_a, Qt.AlignHCenter)
+        prop_gl_a.setAlignment(self.joint_number_a, Qt.AlignHCenter)
+        prop_gl_a.setAlignment(self.joint_number_a, Qt.AlignHCenter)
+        prop_gl_a.setAlignment(self.joint_label_a, Qt.AlignHCenter)
+        prop_gl_a.setAlignment(self.joint_label_a, Qt.AlignHCenter)
         self.speed_slider_a.setOrientation(Qt.Vertical)
         self.acl_slider_a.setOrientation(Qt.Vertical)
 
@@ -1407,9 +1602,12 @@ class ControlCenter(QWidget):
         self.speed_term_a.setObjectName("speed_label")
         self.speed_term_a.setAlignment(Qt.AlignCenter)
         self.acl_term_a.resize(100, 40)
-        self.acl_term_a.setText("(A)")
+        self.acl_term_a.setText("(D)")
         self.acl_term_a.setObjectName("accelerate_label")
         self.acl_term_a.setAlignment(Qt.AlignCenter)
+        self.joint_number_a.setText("0")
+        self.joint_number_a.setObjectName("joint_number")
+        self.joint_label_a.setText("(Joint)")
 
         self.grip_steer_box_a.resize(280, 280)
         self.grip_steer_box_a.setObjectName("grip_steer_box")
@@ -1604,6 +1802,7 @@ class ControlCenter(QWidget):
         self.auto_term_r.setText("(auto)")
         self.auto_term_r.setObjectName("auto_label")
         self.auto_term_r.setAlignment(Qt.AlignLeft)
+        self.auto_mode_r.clicked.connect(self.mode_switched)
 
         self.grip_steer_box_r.resize(280, 280)
         self.grip_steer_box_r.setObjectName("grip_steer_box")
@@ -1774,7 +1973,7 @@ class ControlCenter(QWidget):
         cmb_vbl_c.setContentsMargins(0, 0, 0, 20)
         cmb_vbl_c.setAlignment(Qt.AlignHCenter)
         self.dir_combo_c.addItems(["Left", "Right"])
-        self.depth_combo_c.addItems(["Depth", "Original"])
+        self.depth_combo_c.addItems(["Depth", "RGB"])
         self.bot_box_c.setStyleSheet('''
             QComboBox::down-arrow
                 {
@@ -1792,6 +1991,7 @@ class ControlCenter(QWidget):
         ''')
         self.dir_combo_c.setCursor(Qt.PointingHandCursor)
         self.depth_combo_c.setCursor(Qt.PointingHandCursor)
+        self.depth_combo_c.currentIndexChanged.connect(self.image_type_changed)
 
         self.loading_gif.setSpeed(100)
         self.loading_gif.start()

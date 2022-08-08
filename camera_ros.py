@@ -23,7 +23,7 @@ class CameraRosNode(QThread):
 
     def connect_ros(self):
         self.client.connect()
-        # print('Is ROS connected?', self.client.is_connected)
+        print('Is ROS connected?', self.client.is_connected)
         self.listener.subscribe(self.callback_raw_image)
 
     def disconnect_ros(self):

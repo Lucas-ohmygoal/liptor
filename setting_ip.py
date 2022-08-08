@@ -252,6 +252,12 @@ class SettingIp(QWidget):
                 self.error_label.move(int(self.width() / 2) - 360, 4)
             self.error_label.adjustSize()
             self.show_error_animation()
+        elif flag:
+            self.error_label.setText("* Please fill the other field of this record!")
+            self.error_label.show()
+            self.error_label.move(int(self.width() / 2) - 430, 4)
+            self.error_label.adjustSize()
+            self.show_error_animation()
         else:
             self.error_label.hide()
             self.save_signal.emit(ip_port_list)
